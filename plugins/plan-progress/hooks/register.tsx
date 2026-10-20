@@ -1701,15 +1701,17 @@ const followsSystem = () =>
 const tintIsLight = () => (omarchy ? omarchy.isLight : followsSystem() && isSystemDark !== null ? !isSystemDark : /light/i.test(themeSetting))
 
 // the Omarchy theme is read like the appearance: while a terminal bar is on screen, at most every APPEARANCE_MS, so a
-// theme switch follows within seconds; a machine without the file (or a file without an accent) is never read again
+// theme switch follows within seconds; a machine without the file (or a file without an accent) is never read again.
+// A read cut short with the draw that asked for it (signal aborted) says nothing about the machine: it is tried again
 const OMARCHY_COLORS = 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme/colors.toml"'
 let hasOmarchy = true
 let omarchyAt = -Infinity
 
-async function readOmarchy($: EngineInterface, now: number) {
+async function readOmarchy($: EngineInterface, now: number, signal?: AbortSignal) {
   if (!hasOmarchy || now - omarchyAt < APPEARANCE_MS) return
   omarchyAt = now
   const r = await $.process.run(['/bin/sh', '-c', OMARCHY_COLORS], { timeoutMs: 2000 }).catch(() => null)
+  if (!r && signal?.aborted) return void (omarchyAt = -Infinity)
   const found = r && r.exitCode === 0 ? parseOmarchy(r.stdout) : null
   if (!found) {
     hasOmarchy = false
@@ -1734,7 +1736,7 @@ async function readGnome($: EngineInterface) {
   return /prefer-dark/.test(r.stdout) ? true : /prefer-light/.test(r.stdout) ? false : null
 }
 
-async function probeAppearance($: EngineInterface, now: number) {
+async function probeAppearance($: EngineInterface, now: number, signal?: AbortSignal) {
   if (isProbing || !followsSystem() || now - appearanceAt < APPEARANCE_MS) return
   isProbing = true
   appearanceAt = now
@@ -1752,6 +1754,7 @@ async function probeAppearance($: EngineInterface, now: number) {
       }
     }
     const dark = await readGnome($)
+    if (dark === undefined && signal?.aborted) return void (appearanceAt = -Infinity)
     if (dark === undefined) {
       // neither command: the theme setting alone decides from here on
       system = 'none'
@@ -1764,9 +1767,9 @@ async function probeAppearance($: EngineInterface, now: number) {
   }
 }
 
-async function readTint($: EngineInterface, now: number) {
-  await readOmarchy($, now)
-  if (!omarchy) await probeAppearance($, now)
+async function readTint($: EngineInterface, now: number, signal?: AbortSignal) {
+  await readOmarchy($, now, signal)
+  if (!omarchy) await probeAppearance($, now, signal)
 }
 
 // the first terminal draw of the module's life waits for the appearance: drawn on a guess, a light terminal would show
@@ -3504,7 +3507,7 @@ export const register: Register = (on, options) => {
       const { Box, Button, Text, Raster } = $.ui.resolve(e)
       await read($, tick)
       const now = await $.clock.now()
-      await (firstTint ??= readTint($, now).then(() => void (isLight = tintIsLight())))
+      await (firstTint ??= readTint($, now, next.signal).then(() => void (isLight = tintIsLight())))
       const cols = Math.max(1, e.props.bodyColumns || 100)
       const hasClicks = e.viewport?.isFullscreen === true
       // where clicks land, a bar with agent strips gets a fold button before its ✕; every row keeps its cell, so the

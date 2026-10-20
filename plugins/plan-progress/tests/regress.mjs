@@ -949,6 +949,27 @@ const C = {
       return [`accent ${hasAccent}, track ${track.toString(16)}`, hasAccent && !backs.includes(0x7858ca) && lum(track) > LUM_MID]
     })
   },
+  async omarchy_read_cut_short_is_tried_again(E) {
+    // the first terminal draw reads the theme, and the engine abandons that draw: its read says nothing about the
+    // machine, so the timer reads the file again and the bar takes the accent and the light track
+    return withMachine({ MAC: false, OMARCHY: OMARCHY_LIGHT }, async () => {
+      await E.setTheme('custom:omarchy')
+      await create(E)
+      globalThis.ABORTED = true
+      try {
+        await E.terminal(120)
+      } finally {
+        delete globalThis.ABORTED
+      }
+      await E.terminal(120)
+      E.tick(5000)
+      await E.everyTick()
+      const backs = backsOf(await latestTrack(E))
+      const hasAccent = backs.includes(0x3264eb)
+      const track = backs.at(-1)
+      return [`accent ${hasAccent}, track ${track.toString(16)}`, hasAccent && lum(track) > LUM_MID]
+    })
+  },
   async omarchy_theme_switch_follows(E) {
     // switching the Omarchy theme repaints the bar within one read: new accent, dark track
     return withMachine({ MAC: false, OMARCHY: OMARCHY_LIGHT }, async () => {

@@ -86,6 +86,7 @@ export async function boot(file, kept = new Map()) {
     audio: { play: async ({ asset }) => void sounds.push(asset) },
     process: {
       run: async (argv, init) => {
+        if (globalThis.ABORTED) throw new Error(`$.process.run(${argv[0]}) aborted`)
         procs.push(argv.join(' '))
         procEnvs.push(init?.env ?? {})
         // globalThis.CLI plays the claude CLI, on PATH or by its path (argv in, { exitCode, stdout, stderr } out); unset,
@@ -196,7 +197,9 @@ export async function boot(file, kept = new Map()) {
   const below = () => (typeof globalThis.BELOW === 'function' ? globalThis.BELOW() : (globalThis.BELOW ?? null))
   const dispatch = (event, e, core) => {
     const chain = hooks.filter(h => h.event === event && matches(h.matcher, e))
-    const run = (i, ev) => (i < chain.length ? chain[i].fn($, ev, ev2 => run(i + 1, ev2)) : Promise.resolve(core(ev)))
+    // ABORTED plays a dispatch the engine abandons: next.signal reads aborted, and the $ calls made meanwhile reject
+    const signal = globalThis.ABORTED ? AbortSignal.abort() : new AbortController().signal
+    const run = (i, ev) => (i < chain.length ? chain[i].fn($, ev, Object.assign(ev2 => run(i + 1, ev2), { signal })) : Promise.resolve(core(ev)))
     return run(0, e)
   }
 
